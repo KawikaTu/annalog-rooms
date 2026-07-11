@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Annalog · Room Presence</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link href="https://fonts.googleapis.com/css2?family=Gabarito:wght@500;700;900&family=Spline+Sans+Mono:wght@400;500&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --porcelain: #f6f4ef;
+    --ink: #17150f;
+    --ink-soft: #6f6a5c;
+    --line: #e3dfd4;
+    --cobalt: #2743f0;
+    --apricot: #e8721c;
+    --card: #fffdf9;
+    --ok: #1e9e5a;
+  }
+  * { box-sizing: border-box; margin: 0; }
+  body {
+    background: var(--porcelain);
+    color: var(--ink);
+    font-family: 'Gabarito', system-ui, sans-serif;
+    min-height: 100vh;
+    padding: 28px clamp(16px, 4vw, 48px) 64px;
+  }
+  .mono { font-family: 'Spline Sans Mono', ui-monospace, monospace; }
+
+  header {
+    display: flex; align-items: baseline; justify-content: space-between;
+    flex-wrap: wrap; gap: 8px;
+    border-bottom: 2px solid var(--ink);
+    padding-bottom: 14px; margin-bottom: 28px;
+  }
+  h1 { font-weight: 900; font-size: clamp(22px, 3.4vw, 34px); letter-spacing: -0.02em; }
+  h1 span { color: var(--cobalt); }
+  #conn { font-size: 13px; color: var(--ink-soft); display: flex; align-items: center; gap: 7px; }
+  #conn::before {
+    content: ''; width: 9px; height: 9px; border-radius: 50%;
+    background: #c33; transition: background .3s;
+  }
+  #conn.live::before { background: var(--ok); animation: pulse 2s infinite; }
+  @keyframes pulse { 50% { opacity: .45; } }
+  @media (prefers-reduced-motion: reduce) { #conn.live::before { animation: none; } }
+
+  .board {
+    display: grid; gap: 18px;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    margin-bottom: 34px;
+  }
+  .room {
+    background: var(--card);
+    border: 1.5px solid var(--line);
+    border-radius: 14px;
+    min-height: 180px;
+    padding: 16px 18px 18px;
+    position: relative;
+  }
+  .room.tray { background: transparent; border-style: dashed; }
+  .room h2 {
+    font-size: 13px; font-weight: 700; letter-spacing: .14em;
+    text-transform: uppercase; color: var(--ink-soft); margin-bottom: 14px;
+  }
+  .chips { display: flex; flex-direction: column; gap: 10px; }
+  .chip {
+    border: 1.5px solid var(--ink);
+    border-radius: 999px;
+    background: var(--porcelain);
+    padding: 10px 16px;
+    display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap;
+  }
+  .chip .dot { width: 11px; height: 11px; border-radius: 50%; align-self: center; }
+  .chip .name { font-weight: 700; font-size: 17px; }
+  .chip .since { font-size: 13px; color: var(--ink-soft); }
+  .chip .dists { font-size: 12px; color: var(--ink-soft); width: 100%; padding-left: 21px; }
+
+  .ledger h2 {
+    font-size: 13px; font-weight: 700; letter-spacing: .14em;
+    text-transform: uppercase; color: var(--ink-soft); margin-bottom: 10px;
+  }
+  #feed { list-style: none; display: flex; flex-direction: column; gap: 2px; }
+  #feed li {
+    font-size: 13.5px;
+    padding: 8px 10px;
+    border-bottom: 1px solid var(--line);
+    display: flex; gap: 14px; align-items: baseline; flex-wrap: wrap;
+  }
+  #feed li .t { color: var(--ink-soft); flex-shrink: 0; }
+  #feed li strong { font-weight: 500; }
+  #feed li .who { font-weight: 700; }
+  #feed .empty { color: var(--ink-soft); border-bottom: none; }
+</style>
+</head>
+<body>
+  <header>
+    <h1>Annalog <span>·</span> Room Presence</h1>
+    <div id="conn" class="mono">connecting…</div>
+  </header>
+
+  <section class="board" id="board"></section>
+
+  <section class="ledger">
+    <h2>Movement ledger</h2>
+    <ul id="feed" class="mono"><li class="empty">Waiting for the first movement…</li></ul>
+  </section>
+
+<script>
+  const PALETTE = ['var(--cobalt)', 'var(--apricot)', '#7a2ff0', '#0e8f7a'];
+  const TRAY = 'No signal yet';
+
+  const state = {
+    rooms: [],            // ['Room A', 'Room B']
+    anchorNames: {},      // '0x0001' -> 'Room A'
+    people: {},           // name -> { room, enteredAtIso, color, dists }
+  };
+
+  const board = document.getElementById('board');
+  const feed = document.getElementById('feed');
+  const conn = document.getElementById('conn');
+
+  function colorFor(name) {
+    const names = Object.keys(state.people).sort();
+    return PALETTE[names.indexOf(name) % PALETTE.length];
+  }
+
+  function fmtDur(iso) {
+    if (!iso) return '';
+    let s = Math.max(0, Math.floor((Date.now() - new Date(iso)) / 1000));
+    const m = Math.floor(s / 60); s = s % 60;
+    return m > 0 ? m + 'm ' + s + 's' : s + 's';
+  }
+
+  function fmtClock(iso) {
+    return new Date(iso).toLocaleTimeString([], { hour12: false });
+  }
+
+  function render() {
+    board.innerHTML = '';
+    const roomNames = [...state.rooms, TRAY];
+    for (const roomName of roomNames) {
+      const div = document.createElement('div');
+      div.className = 'room' + (roomName === TRAY ? ' tray' : '');
+      div.innerHTML = '<h2>' + roomName + '</h2>';
+      const chips = document.createElement('div');
+      chips.className = 'chips';
+
+      for (const [name, p] of Object.entries(state.people)) {
+        const inThisRoom = p.room ? p.room === roomName : roomName === TRAY;
+        if (!inThisRoom) continue;
+        const chip = document.createElement('div');
+        chip.className = 'chip';
+        chip.innerHTML =
+          '<span class="dot" style="background:' + colorFor(name) + '"></span>' +
+          '<span class="name">' + name + '</span>' +
+          '<span class="since mono">' + (p.enteredAtIso ? 'for ' + fmtDur(p.enteredAtIso) : '') + '</span>' +
+          '<span class="dists mono">' + (p.dists || '') + '</span>';
+        chips.appendChild(chip);
+      }
+      div.appendChild(chips);
+      board.appendChild(div);
+    }
+  }
+
+  function addFeedLine(e) {
+    feed.querySelector('.empty')?.remove();
+    const li = document.createElement('li');
+    let text =
+      '<span class="t">' + fmtClock(e.enteredAtIso) + '</span>' +
+      '<strong><span class="who" style="color:' + colorFor(e.tagName) + '">' + e.tagName +
+      '</span> entered ' + e.room;
+    if (e.previousRoom) {
+      text += ' — left ' + e.previousRoom + ' after ' + e.previousRoomSeconds + 's';
+    }
+    text += '</strong>';
+    li.innerHTML = text;
+    feed.prepend(li);
+    while (feed.children.length > 60) feed.lastChild.remove();
+  }
+
+  function ensurePerson(name) {
+    if (!state.people[name]) state.people[name] = { room: null, enteredAtIso: null, dists: '' };
+    return state.people[name];
+  }
+
+  function handle(msg) {
+    if (msg.type === 'init') {
+      state.anchorNames = msg.rooms || {};
+      state.rooms = [...new Set(Object.values(state.anchorNames))];
+      for (const [name, p] of Object.entries(msg.people || {})) {
+        Object.assign(ensurePerson(name), p);
+      }
+      render();
+    } else if (msg.type === 'room_entered') {
+      const p = ensurePerson(msg.tagName);
+      p.room = msg.room;
+      p.enteredAtIso = msg.enteredAtIso;
+      addFeedLine(msg);
+      render();
+    } else if (msg.type === 'distances') {
+      const p = ensurePerson(msg.tagName);
+      p.dists = msg.distances
+        .map(d => (state.anchorNames[d.id] || d.id) + ': ' + d.dist.toFixed(1) + 'm')
+        .join('  ·  ');
+      render();
+    }
+  }
+
+  function connect() {
+    const ws = new WebSocket('ws://' + location.host);
+    ws.onopen = () => { conn.textContent = 'live'; conn.classList.add('live'); };
+    ws.onmessage = (ev) => { try { handle(JSON.parse(ev.data)); } catch {} };
+    ws.onclose = () => {
+      conn.textContent = 'reconnecting…'; conn.classList.remove('live');
+      setTimeout(connect, 1500);
+    };
+  }
+  connect();
+  setInterval(render, 1000); // keep the "for 4m 12s" counters ticking
+</script>
+</body>
+</html>

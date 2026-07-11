@@ -1,0 +1,14 @@
+{
+  "name": "annalog-rooms",
+  "version": "1.0.0",
+  "description": "Annalog room presence demo — two UWB tags, two anchors, live dashboard",
+  "type": "module",
+  "scripts": {
+    "start": "node backend/server.js"
+  },
+  "dependencies": {
+    "express": "^4.19.0",
+    "serialport": "^12.0.0",
+    "ws": "^8.17.0"
+  }
+}
